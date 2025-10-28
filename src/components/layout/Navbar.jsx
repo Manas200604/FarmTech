@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../../contexts/SupabaseAuthContext';
+import { useAuth } from '../../contexts/MinimalAuthContext';
 import { Button } from '../ui/Button';
 import { 
   Menu, 

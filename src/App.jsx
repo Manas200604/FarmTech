@@ -1,6 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
-import { AuthProvider, useAuth } from './contexts/SupabaseAuthContext';
+import { AuthProvider, useAuth } from './contexts/MinimalAuthContext';
 import Navbar from './components/layout/Navbar';
 import Login from './pages/Login';
 import Register from './pages/Register';

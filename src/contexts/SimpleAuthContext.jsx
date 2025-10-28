@@ -25,15 +25,6 @@ export const AuthProvider = ({ children }) => {
       });
 
       if (error) throw error;
-
-      // Update last login in users table
-      if (data.user) {
-        await supabase
-          .from('users')
-          .update({ last_login: new Date().toISOString() })
-          .eq('id', data.user.id);
-      }
-
       toast.success('Successfully logged in!');
       return data;
     } catch (error) {
@@ -44,7 +35,6 @@ export const AuthProvider = ({ children }) => {
 
   const register = async (email, password, userData) => {
     try {
-      // Create auth user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -77,7 +67,6 @@ export const AuthProvider = ({ children }) => {
 
         if (profileError) {
           console.error('Profile creation error:', profileError);
-          // Don't throw here - user is created in auth, profile creation can be retried
           toast.error('Account created but profile setup failed. Please contact support.');
         }
       }
@@ -148,56 +137,16 @@ export const AuthProvider = ({ children }) => {
         .single();
 
       if (error) {
-        // If user profile doesn't exist, try to create it
         if (error.code === 'PGRST116') {
           console.log('User profile not found for user:', userId);
-          return await createMissingUserProfile(userId);
+          // Don't try to auto-create for now to avoid issues
+          return null;
         }
         throw error;
       }
       return data;
     } catch (error) {
       console.error('Error fetching user profile:', error);
-      return null;
-    }
-  };
-
-  const createMissingUserProfile = async (userId) => {
-    try {
-      // Get user info from auth
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      
-      if (userError || !user || user.id !== userId) {
-        console.error('Could not get user info for profile creation');
-        return null;
-      }
-
-      const newProfile = {
-        id: userId,
-        email: user.email,
-        name: user.user_metadata?.name || user.email.split('@')[0],
-        role: user.user_metadata?.role || 'farmer',
-        phone: user.user_metadata?.phone || null,
-        farm_location: null,
-        crop_type: null,
-        created_at: new Date().toISOString()
-      };
-
-      const { data: createdProfile, error: createError } = await supabase
-        .from('users')
-        .insert([newProfile])
-        .select()
-        .single();
-
-      if (createError) {
-        console.error('Failed to create user profile:', createError);
-        return null;
-      }
-
-      console.log('✅ Auto-created user profile:', createdProfile);
-      return createdProfile;
-    } catch (error) {
-      console.error('Error creating missing user profile:', error);
       return null;
     }
   };
