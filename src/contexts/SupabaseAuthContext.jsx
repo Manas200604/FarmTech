@@ -64,10 +64,10 @@ export const AuthProvider = ({ children }) => {
           id: authData.user.id,
           email,
           name: userData.name || '',
-          phone: userData.phone,
+          phone: userData.phone || null,
           role: userData.role || 'farmer',
-          farm_location: userData.farmDetails?.location,
-          crop_type: userData.farmDetails?.cropType,
+          farm_location: userData.farmDetails?.location || null,
+          crop_type: userData.farmDetails?.cropType || null,
           created_at: new Date().toISOString()
         };
 
@@ -75,7 +75,11 @@ export const AuthProvider = ({ children }) => {
           .from('users')
           .insert([newUser]);
 
-        if (profileError) throw profileError;
+        if (profileError) {
+          console.error('Profile creation error:', profileError);
+          // Don't throw here - user is created in auth, profile creation can be retried
+          toast.error('Account created but profile setup failed. Please contact support.');
+        }
       }
 
       toast.success('Account created successfully!');
@@ -143,7 +147,14 @@ export const AuthProvider = ({ children }) => {
         .eq('id', userId)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        // If user profile doesn't exist, return null instead of throwing
+        if (error.code === 'PGRST116') {
+          console.log('User profile not found for user:', userId);
+          return null;
+        }
+        throw error;
+      }
       return data;
     } catch (error) {
       console.error('Error fetching user profile:', error);
