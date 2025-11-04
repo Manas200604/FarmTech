@@ -15,6 +15,10 @@ const Register = React.lazy(() => import('./pages/Register'));
 const FarmerDashboard = React.lazy(() => import('./pages/FarmerDashboard'));
 const AdminDashboard = React.lazy(() => import('./pages/NewAdminDashboard'));
 const SimpleAdminDashboard = React.lazy(() => import('./pages/SimpleAdminDashboard'));
+const ComprehensiveAdminDashboard = React.lazy(() => import('./pages/ComprehensiveAdminDashboard'));
+const RedAdminDashboard = React.lazy(() => import('./pages/RedAdminDashboard'));
+const RedAdminAccess = React.lazy(() => import('./components/RedAdminAccess'));
+const AdminLogin = React.lazy(() => import('./components/AdminLogin'));
 const Schemes = React.lazy(() => import('./pages/Schemes'));
 const Contacts = React.lazy(() => import('./pages/Contacts'));
 const Treatments = React.lazy(() => import('./pages/Treatments'));
@@ -142,6 +146,22 @@ function AppContent() {
                 <Materials />
               </ProtectedRoute>
             }
+          />
+          <Route
+            path="/admin-login"
+            element={<AdminLogin onAdminLogin={() => {}} />}
+          />
+          <Route
+            path="/admin-dashboard"
+            element={<ComprehensiveAdminDashboard />}
+          />
+          <Route
+            path="/red-admin"
+            element={<RedAdminAccess />}
+          />
+          <Route
+            path="/red-admin-dashboard"
+            element={<RedAdminDashboard />}
           />
           <Route
             path="/cart"

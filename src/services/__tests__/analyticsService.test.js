@@ -1,441 +1,411 @@
-/**
- * Analytics Service Tests
- */
+import { describe, test, expect, beforeEach, vi } from 'vitest';
+import analyticsService from '../analyticsService';
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import AnalyticsService from '../analyticsService.js';
-import { AnalyticsData } from '../../models/AnalyticsData.js';
-import analyticsStorage from '../../utils/analyticsStorage.js';
-
-// Mock the analytics storage
-vi.mock('../../utils/analyticsStorage.js', () => ({
-  default: {
-    getAllAnalytics: vi.fn(),
-    addAnalyticsData: vi.fn(),
-    getAnalyticsByType: vi.fn(),
-    getAnalyticsByDateRange: vi.fn(),
-    getDashboardSummary: vi.fn(),
-    getGrowthMetrics: vi.fn(),
-    saveAnalytics: vi.fn()
+// Mock Supabase
+vi.mock('../../supabase/client', () => ({
+  supabase: {
+    from: vi.fn(() => ({
+      select: vi.fn(() => ({
+        gte: vi.fn(() => ({
+          lte: vi.fn(() => ({
+            data: [],
+            error: null
+          }))
+        })),
+        single: vi.fn(() => ({
+          data: null,
+          error: null
+        })),
+        data: [],
+        error: null
+      })),
+      insert: vi.fn(() => ({
+        data: null,
+        error: null
+      }))
+    }))
   }
 }));
 
-describe('AnalyticsService', () => {
-  let analyticsService;
-  let mockOptions;
+import { supabase } from '../../supabase/client';
 
+describe('AnalyticsService', () => {
   beforeEach(() => {
-    mockOptions = {
-      serviceName: 'TestAnalyticsService',
-      batchSize: 5,
-      flushInterval: 1000,
-      logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
-        log: vi.fn()
-      }
-    };
-    
-    analyticsService = new AnalyticsService(mockOptions);
-    
-    // Clear all mocks
+    // Clear cache before each test
+    analyticsService.clearCache();
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    if (analyticsService) {
-      analyticsService.stopBatchProcessor();
-    }
+  describe('Cache Management', () => {
+    test('should cache and retrieve data correctly', () => {
+      const testData = { test: 'data' };
+      const cacheKey = 'test_key';
+
+      // Initially should return null
+      expect(analyticsService.getCachedData(cacheKey)).toBeNull();
+
+      // Set cache data
+      analyticsService.setCachedData(cacheKey, testData);
+
+      // Should retrieve cached data
+      expect(analyticsService.getCachedData(cacheKey)).toEqual(testData);
+    });
+
+    test('should expire cached data after timeout', () => {
+      const testData = { test: 'data' };
+      const cacheKey = 'test_key';
+
+      // Mock cache timeout to be very short
+      const originalTimeout = analyticsService.cacheTimeout;
+      analyticsService.cacheTimeout = 1; // 1ms
+
+      analyticsService.setCachedData(cacheKey, testData);
+
+      // Wait for cache to expire
+      setTimeout(() => {
+        expect(analyticsService.getCachedData(cacheKey)).toBeNull();
+        analyticsService.cacheTimeout = originalTimeout;
+      }, 2);
+    });
+
+    test('should clear all cached data', () => {
+      analyticsService.setCachedData('key1', { data: 1 });
+      analyticsService.setCachedData('key2', { data: 2 });
+
+      analyticsService.clearCache();
+
+      expect(analyticsService.getCachedData('key1')).toBeNull();
+      expect(analyticsService.getCachedData('key2')).toBeNull();
+    });
   });
 
-  describe('initialization', () => {
-    it('should initialize with default options', () => {
-      const service = new AnalyticsService();
-      expect(service.serviceName).toBe('AnalyticsService');
-      expect(service.batchSize).toBe(10);
-      expect(service.flushInterval).toBe(30000);
+  describe('User Growth Metrics', () => {
+    test('should process user growth data correctly', () => {
+      const mockUsers = [
+        { created_at: '2024-01-01T00:00:00Z', role: 'farmer' },
+        { created_at: '2024-01-02T00:00:00Z', role: 'farmer' },
+        { created_at: '2024-01-03T00:00:00Z', role: 'admin' },
+        { created_at: new Date().toISOString(), role: 'farmer' } // Today
+      ];
+
+      const result = analyticsService.processUserGrowthData(mockUsers);
+
+      expect(result).toHaveProperty('totalUsers', 4);
+      expect(result).toHaveProperty('farmersCount', 3);
+      expect(result).toHaveProperty('adminsCount', 1);
+      expect(result).toHaveProperty('last30Days');
+      expect(result).toHaveProperty('last7Days');
+      expect(result).toHaveProperty('growthRate30Days');
+      expect(result).toHaveProperty('growthRate7Days');
+      expect(result).toHaveProperty('dailyData');
+      expect(Array.isArray(result.dailyData)).toBe(true);
     });
 
-    it('should initialize with custom options', () => {
-      expect(analyticsService.serviceName).toBe('TestAnalyticsService');
-      expect(analyticsService.batchSize).toBe(5);
-      expect(analyticsService.flushInterval).toBe(1000);
+    test('should handle empty user data', () => {
+      const result = analyticsService.processUserGrowthData([]);
+
+      expect(result.totalUsers).toBe(0);
+      expect(result.farmersCount).toBe(0);
+      expect(result.adminsCount).toBe(0);
+      expect(result.growthRate30Days).toBe(0);
+      expect(result.growthRate7Days).toBe(0);
     });
 
-    it('should initialize sample data when storage is empty', async () => {
-      analyticsStorage.getAllAnalytics.mockResolvedValue([]);
-      analyticsStorage.saveAnalytics.mockResolvedValue(true);
+    test('should fetch user growth metrics from database', async () => {
+      const mockData = [
+        { created_at: '2024-01-01T00:00:00Z', role: 'farmer' },
+        { created_at: '2024-01-02T00:00:00Z', role: 'admin' }
+      ];
 
-      await analyticsService.initialize();
-
-      expect(analyticsStorage.getAllAnalytics).toHaveBeenCalled();
-      expect(analyticsStorage.saveAnalytics).toHaveBeenCalled();
-    });
-
-    it('should not initialize sample data when storage has data', async () => {
-      const existingData = [new AnalyticsData({ metricType: 'test', value: 1 })];
-      analyticsStorage.getAllAnalytics.mockResolvedValue(existingData);
-
-      await analyticsService.initialize();
-
-      expect(analyticsStorage.getAllAnalytics).toHaveBeenCalled();
-      expect(analyticsStorage.saveAnalytics).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('event tracking', () => {
-    it('should track events and add to queue', async () => {
-      const eventType = AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS;
-      const value = 1;
-      const metadata = { userId: 'test-user' };
-
-      const result = await analyticsService.trackEvent(eventType, value, metadata);
-
-      expect(result).toEqual({
-        metricType: eventType,
-        value: value,
-        date: expect.any(Date),
-        metadata: metadata,
-        aggregationType: 'daily',
-        category: 'users'
+      // Mock the Supabase chain
+      const mockSelect = vi.fn().mockReturnValue({
+        data: mockData,
+        error: null
+      });
+      
+      supabase.from.mockReturnValue({
+        select: mockSelect
       });
 
-      expect(analyticsService.eventQueue).toHaveLength(1);
-    });
+      const result = await analyticsService.getUserGrowthMetrics();
 
-    it('should flush queue when batch size is reached', async () => {
-      analyticsStorage.addAnalyticsData.mockResolvedValue(true);
-
-      // Add events up to batch size
-      for (let i = 0; i < 5; i++) {
-        await analyticsService.trackEvent(AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS, 1);
-      }
-
-      // Wait for flush to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      expect(analyticsStorage.addAnalyticsData).toHaveBeenCalledTimes(5);
-      expect(analyticsService.eventQueue).toHaveLength(0);
-    });
-
-    it('should handle tracking errors gracefully', async () => {
-      const invalidEventType = null;
-
-      await expect(analyticsService.trackEvent(invalidEventType)).rejects.toThrow();
+      expect(supabase.from).toHaveBeenCalledWith('users');
+      expect(mockSelect).toHaveBeenCalledWith('created_at, role');
+      expect(result).toHaveProperty('totalUsers', 2);
+      expect(result).toHaveProperty('farmersCount', 1);
+      expect(result).toHaveProperty('adminsCount', 1);
     });
   });
 
-  describe('user growth metrics', () => {
-    it('should get user growth metrics', async () => {
-      const dateRange = {
-        start: new Date('2023-01-01'),
-        end: new Date('2023-01-31')
-      };
-
-      const mockRegistrations = [
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS,
-          value: 10,
-          date: new Date('2023-01-01')
-        }),
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS,
-          value: 15,
-          date: new Date('2023-01-02')
-        })
+  describe('Upload Metrics', () => {
+    test('should process upload data correctly', () => {
+      const mockUploads = [
+        { created_at: '2024-01-01T00:00:00Z', status: 'pending', crop_type: 'wheat' },
+        { created_at: '2024-01-02T00:00:00Z', status: 'approved', crop_type: 'rice' },
+        { created_at: '2024-01-03T00:00:00Z', status: 'rejected', crop_type: 'wheat' },
+        { created_at: '2024-01-04T00:00:00Z', status: 'approved', crop_type: 'corn' }
       ];
 
-      const mockActiveUsers = [
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.ACTIVE_USERS,
-          value: 100,
-          date: new Date('2023-01-01')
-        })
-      ];
+      const result = analyticsService.processUploadData(mockUploads);
 
-      analyticsStorage.getAnalyticsByType
-        .mockResolvedValueOnce(mockRegistrations)
-        .mockResolvedValueOnce(mockActiveUsers)
-        .mockResolvedValueOnce([]); // Previous period data
-
-      const result = await analyticsService.getUserGrowthMetrics(dateRange);
-
-      expect(result).toHaveProperty('registrations');
-      expect(result).toHaveProperty('activeUsers');
-      expect(result).toHaveProperty('summary');
-      expect(result.summary.totalRegistrations).toBe(25);
-      expect(analyticsStorage.getAnalyticsByType).toHaveBeenCalledTimes(3);
+      expect(result).toHaveProperty('totalUploads', 4);
+      expect(result).toHaveProperty('pendingUploads', 1);
+      expect(result).toHaveProperty('approvedUploads', 2);
+      expect(result).toHaveProperty('rejectedUploads', 1);
+      expect(result).toHaveProperty('approvalRate', '50.0');
+      expect(result).toHaveProperty('rejectionRate', '25.0');
+      expect(result).toHaveProperty('cropTypeDistribution');
+      expect(result.cropTypeDistribution).toEqual({
+        wheat: 2,
+        rice: 1,
+        corn: 1
+      });
     });
 
-    it('should handle empty data gracefully', async () => {
-      const dateRange = {
-        start: new Date('2023-01-01'),
-        end: new Date('2023-01-31')
-      };
+    test('should handle empty upload data', () => {
+      const result = analyticsService.processUploadData([]);
 
-      analyticsStorage.getAnalyticsByType.mockResolvedValue([]);
-
-      const result = await analyticsService.getUserGrowthMetrics(dateRange);
-
-      expect(result.registrations).toEqual([]);
-      expect(result.activeUsers).toEqual([]);
-      expect(result.summary.totalRegistrations).toBe(0);
+      expect(result.totalUploads).toBe(0);
+      expect(result.pendingUploads).toBe(0);
+      expect(result.approvedUploads).toBe(0);
+      expect(result.rejectedUploads).toBe(0);
+      expect(result.approvalRate).toBe(0);
+      expect(result.rejectionRate).toBe(0);
     });
-  });
 
-  describe('revenue metrics', () => {
-    it('should get revenue metrics', async () => {
-      const dateRange = {
-        start: new Date('2023-01-01'),
-        end: new Date('2023-01-31')
-      };
-
-      const mockRevenue = [
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.REVENUE,
-          value: 1000,
-          date: new Date('2023-01-01')
-        }),
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.REVENUE,
-          value: 1500,
-          date: new Date('2023-01-02')
-        })
+    test('should fetch upload metrics from database', async () => {
+      const mockData = [
+        { created_at: '2024-01-01T00:00:00Z', status: 'approved', crop_type: 'wheat' }
       ];
 
-      analyticsStorage.getAnalyticsByType
-        .mockResolvedValueOnce(mockRevenue)
-        .mockResolvedValueOnce([]) // Orders value
-        .mockResolvedValueOnce([]) // Materials revenue
-        .mockResolvedValueOnce([]); // Previous period data
+      const mockSelect = vi.fn().mockReturnValue({
+        data: mockData,
+        error: null
+      });
+      
+      supabase.from.mockReturnValue({
+        select: mockSelect
+      });
 
-      const result = await analyticsService.getRevenueMetrics(dateRange);
+      const result = await analyticsService.getUploadMetrics();
 
-      expect(result).toHaveProperty('revenue');
-      expect(result).toHaveProperty('summary');
-      expect(result.summary.totalRevenue).toBe(2500);
+      expect(supabase.from).toHaveBeenCalledWith('uploads');
+      expect(mockSelect).toHaveBeenCalledWith('created_at, status, crop_type');
+      expect(result).toHaveProperty('totalUploads', 1);
+      expect(result).toHaveProperty('approvedUploads', 1);
     });
   });
 
-  describe('dashboard summary', () => {
-    it('should generate dashboard summary', async () => {
-      const mockSummary = {
-        totalUsers: 100,
-        newRegistrations: 10,
-        activeUsers: 80,
-        totalRevenue: 5000,
-        totalOrders: 25,
+  describe('Platform Activity Metrics', () => {
+    test('should fetch platform activity metrics', async () => {
+      const mockUsers = [{ created_at: '2024-01-01T00:00:00Z' }];
+      const mockUploads = [{ created_at: '2024-01-01T00:00:00Z' }];
+      const mockSchemes = [{ created_at: '2024-01-01T00:00:00Z' }];
+      const mockContacts = [{ id: '1' }];
+
+      // Mock multiple Supabase calls
+      supabase.from
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            data: mockUsers,
+            error: null
+          })
+        })
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            data: mockUploads,
+            error: null
+          })
+        })
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            data: mockSchemes,
+            error: null
+          })
+        })
+        .mockReturnValueOnce({
+          select: vi.fn().mockReturnValue({
+            data: mockContacts,
+            error: null
+          })
+        });
+
+      const result = await analyticsService.getPlatformActivityMetrics();
+
+      expect(result).toHaveProperty('totalUsers', 1);
+      expect(result).toHaveProperty('totalUploads', 1);
+      expect(result).toHaveProperty('totalSchemes', 1);
+      expect(result).toHaveProperty('totalContacts', 1);
+      expect(result).toHaveProperty('userGrowthTrend');
+      expect(result).toHaveProperty('uploadTrend');
+    });
+  });
+
+  describe('Content Quality Metrics', () => {
+    test('should calculate content quality metrics', async () => {
+      const mockUploads = [
+        { status: 'approved', admin_feedback: 'Good quality', created_at: '2024-01-01T00:00:00Z' },
+        { status: 'rejected', admin_feedback: '', created_at: '2024-01-02T00:00:00Z' },
+        { status: 'pending', admin_feedback: null, created_at: '2024-01-03T00:00:00Z' }
+      ];
+
+      const mockSelect = vi.fn().mockReturnValue({
+        data: mockUploads,
+        error: null
+      });
+      
+      supabase.from.mockReturnValue({
+        select: mockSelect
+      });
+
+      const result = await analyticsService.getContentQualityMetrics();
+
+      expect(result).toHaveProperty('totalReviewed', 2); // approved + rejected
+      expect(result).toHaveProperty('totalWithFeedback', 1); // only one has feedback
+      expect(result).toHaveProperty('feedbackRate', '33.3'); // 1/3 * 100
+    });
+  });
+
+  describe('Helper Methods', () => {
+    test('should group data by day correctly', () => {
+      const mockData = [
+        { created_at: new Date().toISOString() }, // Today
+        { created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }, // Yesterday
+        { created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() } // 2 days ago
+      ];
+
+      const result = analyticsService.groupByDay(mockData, 3);
+
+      expect(result).toHaveLength(3);
+      expect(result[0]).toHaveProperty('count', 1); // 2 days ago
+      expect(result[1]).toHaveProperty('count', 1); // Yesterday
+      expect(result[2]).toHaveProperty('count', 1); // Today
+      expect(result[0]).toHaveProperty('date');
+      expect(result[0]).toHaveProperty('label');
+    });
+
+    test('should calculate average response time', () => {
+      const now = new Date();
+      const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const twoDaysAgo = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+
+      const mockUploads = [
+        { status: 'approved', created_at: oneDayAgo.toISOString() },
+        { status: 'rejected', created_at: twoDaysAgo.toISOString() },
+        { status: 'pending', created_at: now.toISOString() } // Should be ignored
+      ];
+
+      const result = analyticsService.calculateAverageResponseTime(mockUploads);
+
+      expect(result).toContain('day'); // Should be in days since > 24 hours
+    });
+  });
+
+  describe('Event Tracking', () => {
+    test('should track events to database', async () => {
+      const mockInsert = vi.fn().mockReturnValue({
+        data: null,
+        error: null
+      });
+      
+      supabase.from.mockReturnValue({
+        insert: mockInsert
+      });
+
+      await analyticsService.trackEvent('user_login', { userId: '123' });
+
+      expect(supabase.from).toHaveBeenCalledWith('analytics_metrics');
+      expect(mockInsert).toHaveBeenCalledWith({
+        metric_type: 'user_login',
+        value: 1,
+        date: expect.any(String),
+        metadata: { userId: '123' },
+        aggregation_type: 'event'
+      });
+    });
+
+    test('should handle tracking errors gracefully', async () => {
+      const mockInsert = vi.fn().mockReturnValue({
+        data: null,
+        error: new Error('Database error')
+      });
+      
+      supabase.from.mockReturnValue({
+        insert: mockInsert
+      });
+
+      // Should not throw error
+      await expect(analyticsService.trackEvent('test_event')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('Dashboard Summary', () => {
+    test('should generate comprehensive dashboard summary', async () => {
+      // Mock all the individual metric methods
+      vi.spyOn(analyticsService, 'getUserGrowthMetrics').mockResolvedValue({
+        totalUsers: 10,
+        farmersCount: 8,
+        adminsCount: 2
+      });
+
+      vi.spyOn(analyticsService, 'getUploadMetrics').mockResolvedValue({
         totalUploads: 50,
-        approvedUploads: 45,
-        conversionRate: 31.25,
-        averageOrderValue: 200
-      };
-
-      const mockGrowthMetrics = {
-        growthRate: 15.5,
-        current: 100,
-        previous: 85,
-        period: 'week'
-      };
-
-      analyticsStorage.getDashboardSummary.mockResolvedValue(mockSummary);
-      analyticsStorage.getGrowthMetrics.mockResolvedValue(mockGrowthMetrics);
-
-      const result = await analyticsService.generateDashboardSummary();
-
-      expect(result).toEqual({
-        ...mockSummary,
-        growth: {
-          users: 15.5,
-          revenue: 15.5,
-          orders: 15.5
-        },
-        dateRange: expect.any(Object)
+        approvalRate: '80.0'
       });
-    });
 
-    it('should use default date range when none provided', async () => {
-      analyticsStorage.getDashboardSummary.mockResolvedValue({});
-      analyticsStorage.getGrowthMetrics.mockResolvedValue({ growthRate: 0 });
+      vi.spyOn(analyticsService, 'getPlatformActivityMetrics').mockResolvedValue({
+        totalSchemes: 5,
+        totalContacts: 15
+      });
+
+      vi.spyOn(analyticsService, 'getContentQualityMetrics').mockResolvedValue({
+        feedbackRate: '75.0'
+      });
 
       const result = await analyticsService.generateDashboardSummary();
 
-      expect(result.dateRange).toHaveProperty('start');
-      expect(result.dateRange).toHaveProperty('end');
-      expect(result.dateRange.start).toBeInstanceOf(Date);
-      expect(result.dateRange.end).toBeInstanceOf(Date);
+      expect(result).toHaveProperty('userMetrics');
+      expect(result).toHaveProperty('uploadMetrics');
+      expect(result).toHaveProperty('platformMetrics');
+      expect(result).toHaveProperty('qualityMetrics');
+      expect(result).toHaveProperty('generatedAt');
+      expect(result.userMetrics.totalUsers).toBe(10);
+      expect(result.uploadMetrics.totalUploads).toBe(50);
+    });
+
+    test('should handle errors in dashboard summary generation', async () => {
+      vi.spyOn(analyticsService, 'getUserGrowthMetrics').mockRejectedValue(new Error('Database error'));
+
+      await expect(analyticsService.generateDashboardSummary()).rejects.toThrow('Database error');
     });
   });
 
-  describe('material popularity', () => {
-    it('should get material popularity metrics', async () => {
+  describe('Date Range Filtering', () => {
+    test('should apply date range filters correctly', async () => {
       const dateRange = {
-        start: new Date('2023-01-01'),
-        end: new Date('2023-01-31')
+        start: '2024-01-01',
+        end: '2024-01-31'
       };
 
-      const mockMaterialsSold = [
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.MATERIALS_SOLD,
-          value: 10,
-          date: new Date('2023-01-01'),
-          metadata: { materialId: 'mat1', materialName: 'Material 1', category: 'pesticides' }
-        }),
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.MATERIALS_SOLD,
-          value: 5,
-          date: new Date('2023-01-02'),
-          metadata: { materialId: 'mat2', materialName: 'Material 2', category: 'tools' }
+      const mockGte = vi.fn().mockReturnValue({
+        lte: vi.fn().mockReturnValue({
+          data: [],
+          error: null
         })
-      ];
+      });
 
-      const mockMaterialsRevenue = [
-        new AnalyticsData({
-          metricType: AnalyticsData.METRIC_TYPES.MATERIALS_REVENUE,
-          value: 1000,
-          date: new Date('2023-01-01'),
-          metadata: { materialId: 'mat1' }
-        })
-      ];
+      const mockSelect = vi.fn().mockReturnValue({
+        gte: mockGte
+      });
+      
+      supabase.from.mockReturnValue({
+        select: mockSelect
+      });
 
-      analyticsStorage.getAnalyticsByType
-        .mockResolvedValueOnce(mockMaterialsSold)
-        .mockResolvedValueOnce(mockMaterialsRevenue);
+      await analyticsService.getUserGrowthMetrics(dateRange);
 
-      const result = await analyticsService.getMaterialPopularity(dateRange);
-
-      expect(result).toHaveProperty('popularMaterials');
-      expect(result).toHaveProperty('summary');
-      expect(result.popularMaterials).toHaveLength(2);
-      expect(result.popularMaterials[0].totalSold).toBe(10);
-      expect(result.popularMaterials[0].totalRevenue).toBe(1000);
-    });
-  });
-
-  describe('helper methods', () => {
-    it('should calculate period metrics correctly', () => {
-      const data = [
-        { value: 10 },
-        { value: 20 },
-        { value: 30 }
-      ];
-      const dateRange = {
-        start: new Date('2023-01-01'),
-        end: new Date('2023-01-03')
-      };
-
-      const result = analyticsService.calculatePeriodMetrics(data, dateRange);
-
-      expect(result.total).toBe(60);
-      expect(result.average).toBe(20); // 60 / 3 days
-      expect(result.peak).toBe(30);
-    });
-
-    it('should calculate growth rate correctly', () => {
-      expect(analyticsService.calculateGrowthRate(120, 100)).toBe(20);
-      expect(analyticsService.calculateGrowthRate(80, 100)).toBe(-20);
-      expect(analyticsService.calculateGrowthRate(100, 0)).toBe(100);
-      expect(analyticsService.calculateGrowthRate(0, 0)).toBe(0);
-    });
-
-    it('should get correct category for event type', () => {
-      expect(analyticsService.getCategoryForEventType(AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS)).toBe('users');
-      expect(analyticsService.getCategoryForEventType(AnalyticsData.METRIC_TYPES.REVENUE)).toBe('financial');
-      expect(analyticsService.getCategoryForEventType(AnalyticsData.METRIC_TYPES.ORDERS_COUNT)).toBe('orders');
-      expect(analyticsService.getCategoryForEventType('unknown')).toBe('general');
-    });
-  });
-
-  describe('batch processing', () => {
-    it('should flush event queue manually', async () => {
-      analyticsStorage.addAnalyticsData.mockResolvedValue(true);
-
-      // Add events to queue
-      await analyticsService.trackEvent(AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS, 1);
-      await analyticsService.trackEvent(AnalyticsData.METRIC_TYPES.REVENUE, 100);
-
-      expect(analyticsService.eventQueue).toHaveLength(2);
-
-      // Flush manually
-      await analyticsService.flushEventQueue();
-
-      expect(analyticsService.eventQueue).toHaveLength(0);
-      expect(analyticsStorage.addAnalyticsData).toHaveBeenCalledTimes(2);
-    });
-
-    it('should handle flush errors and retry', async () => {
-      analyticsStorage.addAnalyticsData.mockRejectedValue(new Error('Storage error'));
-
-      // Add event to queue
-      await analyticsService.trackEvent(AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS, 1);
-
-      // Attempt to flush
-      await analyticsService.flushEventQueue();
-
-      // Event should be back in queue for retry
-      expect(analyticsService.eventQueue).toHaveLength(1);
-    });
-  });
-
-  describe('service lifecycle', () => {
-    it('should shutdown gracefully', async () => {
-      analyticsStorage.addAnalyticsData.mockResolvedValue(true);
-
-      // Add events to queue
-      await analyticsService.trackEvent(AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS, 1);
-
-      await analyticsService.shutdown();
-
-      // Queue should be flushed
-      expect(analyticsService.eventQueue).toHaveLength(0);
-      expect(analyticsService.batchProcessor).toBeNull();
-    });
-
-    it('should provide health check status', async () => {
-      analyticsStorage.getAllAnalytics.mockResolvedValue([
-        new AnalyticsData({ metricType: 'test', value: 1 })
-      ]);
-
-      const health = await analyticsService.healthCheck();
-
-      expect(health.status).toBe('healthy');
-      expect(health.details).toHaveProperty('totalAnalyticsRecords');
-      expect(health.details).toHaveProperty('queueSize');
-      expect(health.details).toHaveProperty('batchProcessorActive');
-    });
-
-    it('should report unhealthy status on error', async () => {
-      analyticsStorage.getAllAnalytics.mockRejectedValue(new Error('Storage error'));
-
-      const health = await analyticsService.healthCheck();
-
-      expect(health.status).toBe('unhealthy');
-      expect(health.details).toHaveProperty('error');
-    });
-  });
-
-  describe('error handling', () => {
-    it('should handle invalid date ranges', async () => {
-      const invalidDateRange = {
-        start: new Date('2023-01-31'),
-        end: new Date('2023-01-01') // End before start
-      };
-
-      await expect(analyticsService.getUserGrowthMetrics(invalidDateRange))
-        .rejects.toThrow('Start date must be before end date');
-    });
-
-    it('should handle storage errors gracefully', async () => {
-      analyticsStorage.getAnalyticsByType.mockRejectedValue(new Error('Storage error'));
-
-      const dateRange = {
-        start: new Date('2023-01-01'),
-        end: new Date('2023-01-31')
-      };
-
-      await expect(analyticsService.getUserGrowthMetrics(dateRange))
-        .rejects.toThrow('Failed to get user growth metrics');
+      expect(mockSelect).toHaveBeenCalledWith('created_at, role');
+      expect(mockGte).toHaveBeenCalledWith('created_at', dateRange.start);
     });
   });
 });

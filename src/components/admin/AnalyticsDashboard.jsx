@@ -1,455 +1,507 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../ui/Card';
-import { Button } from '../ui/Button';
-import { 
-  TrendingUp, 
-  TrendingDown, 
-  Users, 
-  DollarSign, 
-  ShoppingCart, 
-  Upload,
-  Calendar,
-  Filter,
-  Download,
-  RefreshCw
-} from 'lucide-react';
-import analyticsStorage from '../../utils/analyticsStorage';
-import { AnalyticsData } from '../../models/AnalyticsData';
+import React, { useState, useEffect } from 'react';
+import analyticsService from '../../services/analyticsService';
+import toast from 'react-hot-toast';
 
-const AnalyticsDashboard = ({ dateRange, onDateRangeChange }) => {
-  const [analytics, setAnalytics] = useState([]);
+const AnalyticsDashboard = () => {
   const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState(null);
-  const [selectedMetric, setSelectedMetric] = useState('overview');
-  const [chartData, setChartData] = useState({});
-
-  // Default date range (last 30 days)
-  const defaultDateRange = useMemo(() => ({
-    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-    end: new Date()
-  }), []);
-
-  const currentDateRange = dateRange || defaultDateRange;
+  const [dateRange, setDateRange] = useState({
+    start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+    end: new Date().toISOString().split('T')[0]
+  });
+  const [dashboardData, setDashboardData] = useState(null);
+  const [activeChart, setActiveChart] = useState('users');
 
   useEffect(() => {
     loadAnalyticsData();
-  }, [currentDateRange]);
+  }, [dateRange]);
 
   const loadAnalyticsData = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      
-      // Load dashboard summary
-      const summaryData = await analyticsStorage.getDashboardSummary(currentDateRange);
-      setSummary(summaryData);
-
-      // Load detailed analytics
-      const analyticsData = await analyticsStorage.getAnalyticsByDateRange(
-        currentDateRange.start,
-        currentDateRange.end
-      );
-      setAnalytics(analyticsData);
-
-      // Prepare chart data
-      await prepareChartData(analyticsData);
-      
+      const data = await analyticsService.generateDashboardSummary({
+        start: dateRange.start,
+        end: dateRange.end
+      });
+      setDashboardData(data);
     } catch (error) {
-      console.error('Error loading analytics data:', error);
+      console.error('Error loading analytics:', error);
+      toast.error('Failed to load analytics data');
     } finally {
       setLoading(false);
     }
   };
 
-  const prepareChartData = async (analyticsData) => {
-    const chartData = {};
-
-    // Group data by metric type
-    const groupedData = analyticsData.reduce((acc, item) => {
-      if (!acc[item.metricType]) {
-        acc[item.metricType] = [];
-      }
-      acc[item.metricType].push(item);
-      return acc;
-    }, {});
-
-    // Prepare chart data for each metric type
-    Object.keys(groupedData).forEach(metricType => {
-      const data = groupedData[metricType]
-        .sort((a, b) => new Date(a.date) - new Date(b.date))
-        .map(item => ({
-          date: new Date(item.date).toLocaleDateString(),
-          value: item.value,
-          formattedValue: item.getFormattedValue()
-        }));
-      
-      chartData[metricType] = data;
-    });
-
-    setChartData(chartData);
+  const handleDateRangeChange = (field, value) => {
+    setDateRange(prev => ({
+      ...prev,
+      [field]: value
+    }));
   };
 
-  const handleDateRangeChange = (newRange) => {
-    if (onDateRangeChange) {
-      onDateRangeChange(newRange);
+  const renderSimpleChart = (data, title, color = '#3b82f6') => {
+    if (!data || data.length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+          No data available
+        </div>
+      );
     }
+
+    const maxValue = Math.max(...data.map(d => d.count));
+    const chartHeight = 200;
+
+    return (
+      <div style={{ padding: '20px' }}>
+        <h3 style={{ margin: '0 0 20px 0', color: '#1f2937' }}>{title}</h3>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'end', 
+          height: `${chartHeight}px`,
+          gap: '4px',
+          padding: '10px 0'
+        }}>
+          {data.map((item, index) => {
+            const height = maxValue > 0 ? (item.count / maxValue) * (chartHeight - 40) : 0;
+            return (
+              <div
+                key={index}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  flex: 1,
+                  minWidth: '20px'
+                }}
+              >
+                <div
+                  style={{
+                    backgroundColor: color,
+                    width: '100%',
+                    height: `${height}px`,
+                    borderRadius: '2px 2px 0 0',
+                    transition: 'all 0.3s ease',
+                    cursor: 'pointer',
+                    opacity: 0.8
+                  }}
+                  title={`${item.label}: ${item.count}`}
+                  onMouseEnter={(e) => {
+                    e.target.style.opacity = '1';
+                    e.target.style.transform = 'scaleY(1.05)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.target.style.opacity = '0.8';
+                    e.target.style.transform = 'scaleY(1)';
+                  }}
+                />
+                <span style={{
+                  fontSize: '10px',
+                  color: '#6b7280',
+                  marginTop: '5px',
+                  transform: 'rotate(-45deg)',
+                  transformOrigin: 'center',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {item.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
-  const handleRefresh = () => {
-    loadAnalyticsData();
-  };
+  const renderMetricCard = (title, value, subtitle, color, icon) => (
+    <div style={{
+      backgroundColor: 'white',
+      padding: '20px',
+      borderRadius: '8px',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      border: `2px solid ${color}20`,
+      textAlign: 'center'
+    }}>
+      <div style={{ fontSize: '24px', marginBottom: '10px' }}>{icon}</div>
+      <h3 style={{ color, margin: '0 0 5px 0', fontSize: '14px', fontWeight: '500' }}>
+        {title}
+      </h3>
+      <p style={{ fontSize: '28px', fontWeight: 'bold', margin: '0 0 5px 0', color: '#1f2937' }}>
+        {value}
+      </p>
+      {subtitle && (
+        <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+          {subtitle}
+        </p>
+      )}
+    </div>
+  );
 
-  const handleExport = async () => {
-    try {
-      const exportData = await analyticsStorage.exportAnalytics('json', currentDateRange);
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `analytics-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Error exporting analytics:', error);
+  const renderPieChart = (data, title) => {
+    if (!data || Object.keys(data).length === 0) {
+      return (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#6b7280' }}>
+          No data available
+        </div>
+      );
     }
+
+    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+    const total = Object.values(data).reduce((sum, value) => sum + value, 0);
+    
+    return (
+      <div style={{ padding: '20px' }}>
+        <h3 style={{ margin: '0 0 20px 0', color: '#1f2937', textAlign: 'center' }}>{title}</h3>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {Object.entries(data).map(([key, value], index) => {
+            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+            const color = colors[index % colors.length];
+            
+            return (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    backgroundColor: color,
+                    borderRadius: '2px'
+                  }}
+                />
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '14px', color: '#374151' }}>{key}</span>
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                      {value} ({percentage}%)
+                    </span>
+                  </div>
+                  <div style={{
+                    width: '100%',
+                    height: '6px',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '3px',
+                    marginTop: '4px'
+                  }}>
+                    <div
+                      style={{
+                        width: `${percentage}%`,
+                        height: '100%',
+                        backgroundColor: color,
+                        borderRadius: '3px',
+                        transition: 'width 0.3s ease'
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
   };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
-        <span className="ml-2 text-gray-600">Loading analytics...</span>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: '400px'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            width: '40px',
+            height: '40px',
+            border: '4px solid #f3f3f3',
+            borderTop: '4px solid #3b82f6',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite',
+            margin: '0 auto 20px'
+          }}></div>
+          <p style={{ color: '#6b7280' }}>Loading analytics...</p>
+        </div>
       </div>
     );
   }
 
+  if (!dashboardData) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px' }}>
+        <p style={{ color: '#6b7280' }}>No analytics data available</p>
+        <button
+          onClick={loadAnalyticsData}
+          style={{
+            backgroundColor: '#3b82f6',
+            color: 'white',
+            border: 'none',
+            padding: '10px 20px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            marginTop: '10px'
+          }}
+        >
+          Retry Loading
+        </button>
+      </div>
+    );
+  }
+
+  const { userMetrics, uploadMetrics, platformMetrics, qualityMetrics } = dashboardData;
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Analytics Dashboard</h2>
-          <p className="text-gray-600">
-            {currentDateRange.start.toLocaleDateString()} - {currentDateRange.end.toLocaleDateString()}
-          </p>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-4 w-4 mr-2" />
-            Export
-          </Button>
+    <div style={{ padding: '20px' }}>
+      {/* Header with Date Range Controls */}
+      <div style={{
+        backgroundColor: 'white',
+        padding: '20px',
+        borderRadius: '8px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        marginBottom: '20px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '15px' }}>
+          <h2 style={{ margin: 0, color: '#1f2937' }}>📊 Analytics Dashboard</h2>
+          
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+            <label style={{ fontSize: '14px', color: '#374151' }}>From:</label>
+            <input
+              type="date"
+              value={dateRange.start}
+              onChange={(e) => handleDateRangeChange('start', e.target.value)}
+              style={{
+                padding: '8px',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                fontSize: '14px'
+              }}
+            />
+            
+            <label style={{ fontSize: '14px', color: '#374151' }}>To:</label>
+            <input
+              type="date"
+              value={dateRange.end}
+              onChange={(e) => handleDateRangeChange('end', e.target.value)}
+              style={{
+                padding: '8px',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px',
+                fontSize: '14px'
+              }}
+            />
+            
+            <button
+              onClick={loadAnalyticsData}
+              style={{
+                backgroundColor: '#3b82f6',
+                color: 'white',
+                border: 'none',
+                padding: '8px 15px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px'
+              }}
+            >
+              🔄 Refresh
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Key Metrics Cards */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <MetricCard
-            title="Total Users"
-            value={summary.totalUsers}
-            change={summary.growth?.users || 0}
-            icon={Users}
-            color="blue"
-          />
-          <MetricCard
-            title="Total Revenue"
-            value={`₹${summary.totalRevenue.toLocaleString()}`}
-            change={summary.growth?.revenue || 0}
-            icon={DollarSign}
-            color="green"
-          />
-          <MetricCard
-            title="Total Orders"
-            value={summary.totalOrders}
-            change={summary.growth?.orders || 0}
-            icon={ShoppingCart}
-            color="purple"
-          />
-          <MetricCard
-            title="Total Uploads"
-            value={summary.totalUploads}
-            change={0} // Calculate upload growth if needed
-            icon={Upload}
-            color="orange"
-          />
-        </div>
-      )}
-
-      {/* Additional Metrics */}
-      {summary && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">New Registrations</p>
-                  <p className="text-2xl font-bold text-gray-900">{summary.newRegistrations}</p>
-                </div>
-                <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                  <Users className="h-6 w-6 text-blue-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Conversion Rate</p>
-                  <p className="text-2xl font-bold text-gray-900">{summary.conversionRate.toFixed(2)}%</p>
-                </div>
-                <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center">
-                  <TrendingUp className="h-6 w-6 text-green-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600">Avg Order Value</p>
-                  <p className="text-2xl font-bold text-gray-900">₹{summary.averageOrderValue.toFixed(0)}</p>
-                </div>
-                <div className="h-12 w-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                  <DollarSign className="h-6 w-6 text-purple-600" />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Chart Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* User Growth Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>User Growth</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SimpleLineChart 
-              data={chartData[AnalyticsData.METRIC_TYPES.USER_REGISTRATIONS] || []}
-              color="#3B82F6"
-              label="New Users"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Revenue Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Revenue Trend</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SimpleLineChart 
-              data={chartData[AnalyticsData.METRIC_TYPES.REVENUE] || []}
-              color="#10B981"
-              label="Revenue"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Orders Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Orders Trend</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SimpleLineChart 
-              data={chartData[AnalyticsData.METRIC_TYPES.ORDERS_COUNT] || []}
-              color="#8B5CF6"
-              label="Orders"
-            />
-          </CardContent>
-        </Card>
-
-        {/* Uploads Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Upload Activity</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SimpleLineChart 
-              data={chartData[AnalyticsData.METRIC_TYPES.UPLOADS_COUNT] || []}
-              color="#F59E0B"
-              label="Uploads"
-            />
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Detailed Analytics Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Analytics Data</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Metric
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Value
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Category
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {analytics.slice(0, 10).map((item, index) => (
-                  <tr key={index}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {new Date(item.date).toLocaleDateString()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {item.getMetricDisplayName()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {item.getFormattedValue()}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">
-                        {item.category}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-};
-
-// Metric Card Component
-const MetricCard = ({ title, value, change, icon: Icon, color }) => {
-  const isPositive = change >= 0;
-  const colorClasses = {
-    blue: 'bg-blue-100 text-blue-600',
-    green: 'bg-green-100 text-green-600',
-    purple: 'bg-purple-100 text-purple-600',
-    orange: 'bg-orange-100 text-orange-600'
-  };
-
-  return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-gray-600">{title}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-            {change !== 0 && (
-              <div className="flex items-center mt-1">
-                {isPositive ? (
-                  <TrendingUp className="h-4 w-4 text-green-500 mr-1" />
-                ) : (
-                  <TrendingDown className="h-4 w-4 text-red-500 mr-1" />
-                )}
-                <span className={`text-sm font-medium ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                  {Math.abs(change)}%
-                </span>
-              </div>
-            )}
-          </div>
-          <div className={`h-12 w-12 rounded-lg flex items-center justify-center ${colorClasses[color]}`}>
-            <Icon className="h-6 w-6" />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-// Simple Line Chart Component (using SVG)
-const SimpleLineChart = ({ data, color, label }) => {
-  if (!data || data.length === 0) {
-    return (
-      <div className="h-64 flex items-center justify-center text-gray-500">
-        No data available
-      </div>
-    );
-  }
-
-  const maxValue = Math.max(...data.map(d => d.value));
-  const minValue = Math.min(...data.map(d => d.value));
-  const range = maxValue - minValue || 1;
-
-  const width = 400;
-  const height = 200;
-  const padding = 40;
-
-  const points = data.map((d, i) => {
-    const x = padding + (i * (width - 2 * padding)) / (data.length - 1);
-    const y = height - padding - ((d.value - minValue) / range) * (height - 2 * padding);
-    return `${x},${y}`;
-  }).join(' ');
-
-  return (
-    <div className="h-64">
-      <svg width="100%" height="100%" viewBox={`0 0 ${width} ${height}`} className="overflow-visible">
-        {/* Grid lines */}
-        <defs>
-          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#f3f4f6" strokeWidth="1"/>
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#grid)" />
-        
-        {/* Line */}
-        <polyline
-          fill="none"
-          stroke={color}
-          strokeWidth="2"
-          points={points}
-        />
-        
-        {/* Data points */}
-        {data.map((d, i) => {
-          const x = padding + (i * (width - 2 * padding)) / (data.length - 1);
-          const y = height - padding - ((d.value - minValue) / range) * (height - 2 * padding);
-          return (
-            <circle
-              key={i}
-              cx={x}
-              cy={y}
-              r="4"
-              fill={color}
-              className="hover:r-6 transition-all cursor-pointer"
-            >
-              <title>{`${d.date}: ${d.formattedValue || d.value}`}</title>
-            </circle>
-          );
-        })}
-        
-        {/* Y-axis labels */}
-        <text x="10" y={padding} className="text-xs fill-gray-500">{maxValue}</text>
-        <text x="10" y={height - padding} className="text-xs fill-gray-500">{minValue}</text>
-        
-        {/* X-axis labels */}
-        {data.length > 0 && (
-          <>
-            <text x={padding} y={height - 10} className="text-xs fill-gray-500">{data[0].date}</text>
-            <text x={width - padding} y={height - 10} className="text-xs fill-gray-500 text-end">{data[data.length - 1].date}</text>
-          </>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '20px',
+        marginBottom: '30px'
+      }}>
+        {renderMetricCard(
+          'Total Users',
+          userMetrics.totalUsers,
+          `${userMetrics.last30Days} in last 30 days`,
+          '#3b82f6',
+          '👥'
         )}
-      </svg>
+        {renderMetricCard(
+          'Total Uploads',
+          uploadMetrics.totalUploads,
+          `${uploadMetrics.approvalRate}% approval rate`,
+          '#10b981',
+          '📤'
+        )}
+        {renderMetricCard(
+          'Pending Reviews',
+          uploadMetrics.pendingUploads,
+          `${uploadMetrics.rejectionRate}% rejection rate`,
+          '#f59e0b',
+          '⏳'
+        )}
+        {renderMetricCard(
+          'User Growth (30d)',
+          `${userMetrics.growthRate30Days}%`,
+          `${userMetrics.last7Days} in last 7 days`,
+          '#8b5cf6',
+          '📈'
+        )}
+      </div>
+
+      {/* Chart Selection Tabs */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: '8px',
+        padding: '10px',
+        marginBottom: '20px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+        display: 'flex',
+        gap: '10px',
+        flexWrap: 'wrap'
+      }}>
+        {[
+          { id: 'users', name: '👥 User Growth', color: '#3b82f6' },
+          { id: 'uploads', name: '📤 Upload Trends', color: '#10b981' },
+          { id: 'crops', name: '🌾 Crop Distribution', color: '#f59e0b' }
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveChart(tab.id)}
+            style={{
+              backgroundColor: activeChart === tab.id ? tab.color : 'transparent',
+              color: activeChart === tab.id ? 'white' : '#374151',
+              border: activeChart === tab.id ? 'none' : '1px solid #d1d5db',
+              padding: '10px 15px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: '500',
+              transition: 'all 0.2s'
+            }}
+          >
+            {tab.name}
+          </button>
+        ))}
+      </div>
+
+      {/* Charts Section */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))',
+        gap: '20px',
+        marginBottom: '30px'
+      }}>
+        {/* Main Chart */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          minHeight: '300px'
+        }}>
+          {activeChart === 'users' && renderSimpleChart(
+            userMetrics.dailyData,
+            'User Registration Trends (Last 30 Days)',
+            '#3b82f6'
+          )}
+          {activeChart === 'uploads' && renderSimpleChart(
+            uploadMetrics.dailyData,
+            'Upload Activity Trends (Last 30 Days)',
+            '#10b981'
+          )}
+          {activeChart === 'crops' && renderPieChart(
+            uploadMetrics.cropTypeDistribution,
+            'Crop Type Distribution'
+          )}
+        </div>
+
+        {/* Secondary Chart/Stats */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+          minHeight: '300px'
+        }}>
+          <div style={{ padding: '20px' }}>
+            <h3 style={{ margin: '0 0 20px 0', color: '#1f2937' }}>📋 Platform Summary</h3>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#374151' }}>👥 Farmers</span>
+                <span style={{ fontWeight: 'bold', color: '#3b82f6' }}>{userMetrics.farmersCount}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#374151' }}>🛡️ Admins</span>
+                <span style={{ fontWeight: 'bold', color: '#8b5cf6' }}>{userMetrics.adminsCount}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#374151' }}>✅ Approved Uploads</span>
+                <span style={{ fontWeight: 'bold', color: '#10b981' }}>{uploadMetrics.approvedUploads}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#374151' }}>❌ Rejected Uploads</span>
+                <span style={{ fontWeight: 'bold', color: '#ef4444' }}>{uploadMetrics.rejectedUploads}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#374151' }}>📋 Total Schemes</span>
+                <span style={{ fontWeight: 'bold', color: '#f59e0b' }}>{platformMetrics.totalSchemes}</span>
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#374151' }}>📞 Expert Contacts</span>
+                <span style={{ fontWeight: 'bold', color: '#06b6d4' }}>{platformMetrics.totalContacts}</span>
+              </div>
+              
+              {qualityMetrics.avgResponseTime && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: '#374151' }}>⏱️ Avg Response Time</span>
+                  <span style={{ fontWeight: 'bold', color: '#6b7280' }}>{qualityMetrics.avgResponseTime}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Quality Metrics */}
+      <div style={{
+        backgroundColor: 'white',
+        padding: '20px',
+        borderRadius: '8px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+      }}>
+        <h3 style={{ margin: '0 0 20px 0', color: '#1f2937' }}>🎯 Content Quality Metrics</h3>
+        
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '20px'
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#10b981', marginBottom: '5px' }}>
+              {qualityMetrics.totalReviewed}
+            </div>
+            <div style={{ fontSize: '14px', color: '#6b7280' }}>Total Reviewed</div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#3b82f6', marginBottom: '5px' }}>
+              {qualityMetrics.feedbackRate}%
+            </div>
+            <div style={{ fontSize: '14px', color: '#6b7280' }}>Feedback Rate</div>
+          </div>
+          
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '32px', fontWeight: 'bold', color: '#f59e0b', marginBottom: '5px' }}>
+              {qualityMetrics.totalWithFeedback}
+            </div>
+            <div style={{ fontSize: '14px', color: '#6b7280' }}>With Feedback</div>
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 };
