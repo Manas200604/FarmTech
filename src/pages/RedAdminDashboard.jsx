@@ -287,6 +287,80 @@ const RedAdminDashboard = () => {
           ))}
         </div>
 
+        {/* Admin Pages Navigation */}
+        <div style={{
+          backgroundColor: 'white',
+          borderRadius: '8px',
+          padding: '15px',
+          marginBottom: '20px',
+          boxShadow: '0 2px 4px rgba(220,38,38,0.1)',
+          border: '2px solid #fecaca'
+        }}>
+          <h3 style={{ color: '#dc2626', margin: '0 0 15px 0', fontSize: '16px' }}>🚀 Advanced Admin Tools</h3>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button
+              onClick={() => navigate('/admin/uploads')}
+              style={{
+                backgroundColor: '#dc2626',
+                color: 'white',
+                border: 'none',
+                padding: '10px 15px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}
+            >
+              📤 Upload Manager
+            </button>
+            <button
+              onClick={() => navigate('/admin/users')}
+              style={{
+                backgroundColor: '#dc2626',
+                color: 'white',
+                border: 'none',
+                padding: '10px 15px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}
+            >
+              👥 User Manager
+            </button>
+            <button
+              onClick={() => navigate('/admin/schemes')}
+              style={{
+                backgroundColor: '#dc2626',
+                color: 'white',
+                border: 'none',
+                padding: '10px 15px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}
+            >
+              📋 Scheme Manager
+            </button>
+            <button
+              onClick={() => navigate('/admin/orders')}
+              style={{
+                backgroundColor: '#dc2626',
+                color: 'white',
+                border: 'none',
+                padding: '10px 15px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: '600'
+              }}
+            >
+              📦 Order Manager
+            </button>
+          </div>
+        </div>
+
         {/* Overview Tab */}
         {activeTab === 'overview' && (
           <div>

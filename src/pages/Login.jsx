@@ -162,10 +162,19 @@ const Login = () => {
                 </div>
               </div>
 
-              <div className="mt-6">
+              <div className="mt-6 space-y-3">
                 <Link to="/register">
                   <Button variant="outline" className="w-full">
                     Create New Account
+                  </Button>
+                </Link>
+                
+                <Link to="/admin-login">
+                  <Button 
+                    variant="outline" 
+                    className="w-full border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400"
+                  >
+                    🛡️ Admin Login
                   </Button>
                 </Link>
               </div>

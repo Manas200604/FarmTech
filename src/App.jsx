@@ -19,6 +19,10 @@ const ComprehensiveAdminDashboard = React.lazy(() => import('./pages/Comprehensi
 const RedAdminDashboard = React.lazy(() => import('./pages/RedAdminDashboard'));
 const RedAdminAccess = React.lazy(() => import('./components/RedAdminAccess'));
 const AdminLogin = React.lazy(() => import('./components/AdminLogin'));
+const AdminUploadManager = React.lazy(() => import('./pages/admin/AdminUploadManager'));
+const AdminUserManager = React.lazy(() => import('./pages/admin/AdminUserManager'));
+const AdminSchemeManager = React.lazy(() => import('./pages/admin/AdminSchemeManager'));
+const AdminOrderManager = React.lazy(() => import('./pages/admin/AdminOrderManager'));
 const Schemes = React.lazy(() => import('./pages/Schemes'));
 const Contacts = React.lazy(() => import('./pages/Contacts'));
 const Treatments = React.lazy(() => import('./pages/Treatments'));
@@ -162,6 +166,22 @@ function AppContent() {
           <Route
             path="/red-admin-dashboard"
             element={<RedAdminDashboard />}
+          />
+          <Route
+            path="/admin/uploads"
+            element={<AdminUploadManager />}
+          />
+          <Route
+            path="/admin/users"
+            element={<AdminUserManager />}
+          />
+          <Route
+            path="/admin/schemes"
+            element={<AdminSchemeManager />}
+          />
+          <Route
+            path="/admin/orders"
+            element={<AdminOrderManager />}
           />
           <Route
             path="/cart"

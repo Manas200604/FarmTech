@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { toast } from 'react-hot-toast';
 import cropFormsStorage from '../../utils/cropFormsStorage';
 import { useAuth } from '../../contexts/FastAuthContext';
+import { supabase } from '../../supabase/client';
 import { 
   Upload, 
   User, 
@@ -110,12 +111,29 @@ const CropFormSubmission = ({ onClose, onSuccess }) => {
     setIsSubmitting(true);
 
     try {
+      // Save to local storage (existing functionality)
       const submission = cropFormsStorage.addCropForm({
         ...formData,
         farmerId: userProfile?.id || 'anonymous'
       });
 
-      toast.success('Crop form submitted successfully!');
+      // Also save to Supabase uploads table for admin review
+      const { error: uploadError } = await supabase
+        .from('uploads')
+        .insert({
+          user_id: userProfile?.id,
+          description: `${formData.description} | Requirements: ${formData.requirements} | Land: ${formData.landSize} acres | Crop: ${formData.cropType} | Location: ${formData.location}`,
+          crop_type: formData.cropType,
+          status: 'pending',
+          image_url: formData.cropImages.length > 0 ? formData.cropImages[0] : null
+        });
+
+      if (uploadError) {
+        console.error('Error saving to uploads table:', uploadError);
+        // Still show success since local storage worked
+      }
+
+      toast.success('Crop form submitted successfully! Admin will review your submission.');
       onSuccess(submission);
     } catch (error) {
       console.error('Error submitting crop form:', error);
